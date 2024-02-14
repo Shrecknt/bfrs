@@ -1,14 +1,13 @@
 use bfrs::{collect::Execute, deduplicate::DeduplicatedAstNode, ChunkedReceiverWrapper};
 use clap::Parser;
 use std::{
+    collections::VecDeque,
     fs,
     io::Cursor,
     sync::mpsc::{channel, Receiver},
     thread,
+    time::Instant,
 };
-
-#[cfg(debug_assertions)]
-use std::time::Instant;
 
 const DEFAULT_OPTIMIZATION: usize = 0;
 const DEFAULT_MEMORY_SIZE: usize = 2048;
@@ -43,6 +42,11 @@ struct Args {
 fn main() {
     let args: Args = Args::parse();
 
+    #[cfg(debug_assertions)]
+    let display_times: bool = true;
+    #[cfg(not(debug_assertions))]
+    let display_times: bool = std::env::var("DISPLAY_TIMES") == Ok("1".to_string());
+
     let token_channel = channel();
     let ast_channel = channel();
     let deduplicate_channel = channel();
@@ -50,10 +54,9 @@ fn main() {
     let file = fs::read(args.target).expect("Input file not found");
     let mut program = Cursor::new(file.as_slice());
 
-    #[cfg(debug_assertions)]
     let start_time = Instant::now();
 
-    let mut collected = vec![];
+    let mut collected = VecDeque::new();
     thread::scope(|s| {
         s.spawn(|| {
             bfrs::parse::Token::parse(
@@ -70,28 +73,26 @@ fn main() {
                 args.chunk_size.unwrap_or(DEFAULT_CHUNK_SIZE),
             );
 
-            #[cfg(debug_assertions)]
-            {
+            if display_times {
                 let end_time = Instant::now();
                 let duration = end_time - start_time;
                 println!("Parsed AST in {duration:?}");
             }
         });
         s.spawn(|| {
-            let receiver = ast_channel.1;
+            let receiver = ChunkedReceiverWrapper::new(ast_channel.1);
             bfrs::deduplicate::DeduplicatedAstNode::parse(receiver, deduplicate_channel.0);
         });
         s.spawn(|| {
-            let receiver = deduplicate_channel.1;
-            collected = bfrs::collect::CollectedAstNode::parse(&receiver);
+            let mut receiver = ChunkedReceiverWrapper::new(deduplicate_channel.1);
+            collected = bfrs::collect::CollectedAstNode::parse(&mut receiver);
         });
     });
     if args.optimization.unwrap_or(DEFAULT_OPTIMIZATION) >= 1 {
         collected = bfrs::optimizations::collapse_unbounded(collected);
     }
 
-    #[cfg(debug_assertions)]
-    {
+    if display_times {
         let end_time = Instant::now();
         let duration = end_time - start_time;
         println!("Parsed and optimized AST in {duration:?}");
@@ -100,11 +101,9 @@ fn main() {
     let mut state = vec![0_u8; args.memory_size.unwrap_or(DEFAULT_MEMORY_SIZE)];
     let mut pointer = 0_isize;
 
-    #[cfg(debug_assertions)]
     let start_time = Instant::now();
     collected.execute(state.as_mut_slice(), &mut pointer);
-    #[cfg(debug_assertions)]
-    {
+    if display_times {
         let end_time = Instant::now();
         let duration = end_time - start_time;
         println!("Execution took {duration:?}");
@@ -112,7 +111,7 @@ fn main() {
 }
 
 #[allow(unused)]
-fn print_ast(receiver: Receiver<Vec<DeduplicatedAstNode>>, indent: usize) {
+fn print_ast(receiver: Receiver<VecDeque<DeduplicatedAstNode>>, indent: usize) {
     let indent_str = "    ".repeat(indent);
     while let Ok(nodes) = receiver.recv() {
         for node in nodes {

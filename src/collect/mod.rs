@@ -1,5 +1,6 @@
-use crate::deduplicate::DeduplicatedAstNode;
+use crate::{deduplicate::DeduplicatedAstNode, ChunkedReceive, ChunkedReceiverWrapper};
 use std::{
+    collections::VecDeque,
     io::{Read, Write},
     sync::mpsc::Receiver,
 };
@@ -11,14 +12,14 @@ pub enum CollectedAstNode {
     ModifyDataOffset { new_data: isize, offset: isize },
     Output,
     Input,
-    Group { contents: Vec<Self> },
+    Group { contents: VecDeque<Self> },
 }
 
 pub trait Execute {
     fn execute(self, state: &mut [u8], pointer: &mut isize);
 }
 
-impl Execute for Vec<CollectedAstNode> {
+impl Execute for VecDeque<CollectedAstNode> {
     fn execute(self, state: &mut [u8], pointer: &mut isize) {
         CollectedAstNode::Group { contents: self }.execute(state, pointer)
     }
@@ -34,21 +35,27 @@ impl Execute for CollectedAstNode {
 }
 
 impl CollectedAstNode {
-    pub fn parse(receiver: &Receiver<Vec<DeduplicatedAstNode>>) -> Vec<Self> {
-        let mut res = Vec::new();
-        while let Ok(nodes) = receiver.recv() {
-            for node in nodes {
-                let new_node = match &node {
-                    DeduplicatedAstNode::ModifyPointer(val) => Self::ModifyPointer { offset: *val },
-                    DeduplicatedAstNode::ModifyData(val) => Self::ModifyData { new_data: *val },
-                    DeduplicatedAstNode::Output => Self::Output,
-                    DeduplicatedAstNode::Input => Self::Input,
-                    DeduplicatedAstNode::Group(receiver) => Self::Group {
-                        contents: Self::parse(receiver),
-                    },
-                };
-                res.push(new_node);
-            }
+    pub fn parse(
+        receiver: &mut ChunkedReceiverWrapper<
+            Receiver<VecDeque<DeduplicatedAstNode>>,
+            DeduplicatedAstNode,
+        >,
+    ) -> VecDeque<Self> {
+        let mut res = VecDeque::new();
+        while let Some(node) = receiver.next() {
+            let new_node = match node {
+                DeduplicatedAstNode::ModifyPointer(val) => Self::ModifyPointer { offset: val },
+                DeduplicatedAstNode::ModifyData(val) => Self::ModifyData { new_data: val },
+                DeduplicatedAstNode::Output => Self::Output,
+                DeduplicatedAstNode::Input => Self::Input,
+                DeduplicatedAstNode::Group(receiver) => {
+                    let mut receiver = ChunkedReceiverWrapper::new(receiver);
+                    Self::Group {
+                        contents: Self::parse(&mut receiver),
+                    }
+                }
+            };
+            res.push_back(new_node);
         }
         res
     }
@@ -56,7 +63,7 @@ impl CollectedAstNode {
     fn execute_internal(
         state: &mut [u8],
         pointer: &mut isize,
-        program: &Vec<Self>,
+        program: &VecDeque<Self>,
         is_group: bool,
     ) {
         if is_group && state[*pointer as usize] == 0 {
