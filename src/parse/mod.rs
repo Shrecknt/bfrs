@@ -3,6 +3,8 @@ use std::{
     sync::mpsc::Sender,
 };
 
+const CHUNK_SIZE: usize = 8;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Token {
     IncrementPointer,
@@ -16,7 +18,8 @@ pub enum Token {
 }
 
 impl Token {
-    pub fn parse(cursor: &mut Cursor<&[u8]>, sender: Sender<Token>) {
+    pub fn parse(cursor: &mut Cursor<&[u8]>, sender: Sender<Vec<Token>>) {
+        let mut chunks = Vec::with_capacity(CHUNK_SIZE);
         let mut buf = [0u8; 1];
         while let Ok(_) = cursor.read_exact(&mut buf) {
             let token = match buf[0] {
@@ -30,7 +33,14 @@ impl Token {
                 b']' => Token::RightBracket,
                 _ => continue,
             };
-            sender.send(token).unwrap();
+            chunks.push_within_capacity(token).unwrap();
+            if chunks.capacity() == chunks.len() {
+                sender.send(chunks).unwrap();
+                chunks = Vec::with_capacity(8);
+            }
+        }
+        if !chunks.is_empty() {
+            sender.send(chunks).unwrap();
         }
     }
 }

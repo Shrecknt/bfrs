@@ -9,26 +9,43 @@ pub enum AstNode {
     DecrementData,
     Output,
     Input,
-    Group(Receiver<Self>),
+    Group(Receiver<Vec<Self>>),
 }
 
 impl AstNode {
-    pub fn parse(receiver: &Receiver<Token>, sender: Sender<Self>) {
-        while let Ok(token) = receiver.recv() {
-            match token {
-                Token::LeftBracket => {
-                    let (s, r) = channel();
-                    sender.send(Self::Group(r)).unwrap();
-                    Self::parse(receiver, s);
+    pub fn parse(receiver: &Receiver<Vec<Token>>, sender: Sender<Vec<Self>>) -> Vec<Self> {
+        while let Ok(tokens) = receiver.recv() {
+            let mut chunks = Vec::with_capacity(tokens.len());
+            for token in tokens {
+                match token {
+                    Token::LeftBracket => {
+                        let (s, r) = channel();
+                        chunks.push_within_capacity(Self::Group(r)).unwrap();
+                        let remaining_chunk = Self::parse(receiver, s);
+                        todo!();
+                    }
+                    Token::RightBracket => {
+                        sender.send(chunks).unwrap();
+                        todo!()
+                    }
+                    Token::IncrementPointer => {
+                        chunks.push_within_capacity(Self::IncrementPointer).unwrap()
+                    }
+                    Token::DecrementPointer => {
+                        chunks.push_within_capacity(Self::DecrementPointer).unwrap()
+                    }
+                    Token::IncrementData => {
+                        chunks.push_within_capacity(Self::IncrementData).unwrap()
+                    }
+                    Token::DecrementData => {
+                        chunks.push_within_capacity(Self::DecrementData).unwrap()
+                    }
+                    Token::Output => chunks.push_within_capacity(Self::Output).unwrap(),
+                    Token::Input => chunks.push_within_capacity(Self::Input).unwrap(),
                 }
-                Token::RightBracket => return,
-                Token::IncrementPointer => sender.send(Self::IncrementPointer).unwrap(),
-                Token::DecrementPointer => sender.send(Self::DecrementPointer).unwrap(),
-                Token::IncrementData => sender.send(Self::IncrementData).unwrap(),
-                Token::DecrementData => sender.send(Self::DecrementData).unwrap(),
-                Token::Output => sender.send(Self::Output).unwrap(),
-                Token::Input => sender.send(Self::Input).unwrap(),
             }
+            sender.send(chunks).unwrap();
         }
+        Vec::new()
     }
 }
