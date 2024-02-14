@@ -1,16 +1,18 @@
-use bfrs::{collect::Execute, deduplicate::DeduplicatedAstNode};
+use bfrs::{collect::Execute, deduplicate::DeduplicatedAstNode, ChunkedReceiverWrapper};
 use clap::Parser;
 use std::{
     fs,
     io::Cursor,
     sync::mpsc::{channel, Receiver},
     thread,
-    time::Instant,
 };
+
+#[cfg(debug_assertions)]
+use std::time::Instant;
 
 const DEFAULT_OPTIMIZATION: usize = 0;
 const DEFAULT_MEMORY_SIZE: usize = 2048;
-const DEFAULT_CHUNK_SIZE: usize = 8;
+const DEFAULT_CHUNK_SIZE: usize = 64;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -33,7 +35,7 @@ struct Args {
 
     /// Size of chunks to be used in
     /// the parsing pipeline
-    /// `default = 8`
+    /// `default = 64`
     #[arg(short = 'c', long = "chunk-size")]
     pub chunk_size: Option<usize>,
 }
@@ -48,6 +50,7 @@ fn main() {
     let file = fs::read(args.target).expect("Input file not found");
     let mut program = Cursor::new(file.as_slice());
 
+    #[cfg(debug_assertions)]
     let start_time = Instant::now();
 
     let mut collected = vec![];
@@ -60,8 +63,19 @@ fn main() {
             );
         });
         s.spawn(|| {
-            let receiver = token_channel.1;
-            bfrs::ast::AstNode::parse(&receiver, ast_channel.0);
+            let mut receiver = ChunkedReceiverWrapper::new(token_channel.1);
+            bfrs::ast::AstNode::parse(
+                &mut receiver,
+                ast_channel.0,
+                args.chunk_size.unwrap_or(DEFAULT_CHUNK_SIZE),
+            );
+
+            #[cfg(debug_assertions)]
+            {
+                let end_time = Instant::now();
+                let duration = end_time - start_time;
+                println!("Parsed AST in {duration:?}");
+            }
         });
         s.spawn(|| {
             let receiver = ast_channel.1;
@@ -72,23 +86,29 @@ fn main() {
             collected = bfrs::collect::CollectedAstNode::parse(&receiver);
         });
     });
-    println!("{collected:?}");
     if args.optimization.unwrap_or(DEFAULT_OPTIMIZATION) >= 1 {
         collected = bfrs::optimizations::collapse_unbounded(collected);
     }
 
-    let end_time = Instant::now();
-    let duration = end_time - start_time;
-    println!("Parsed AST in {duration:?}");
-
-    println!("{collected:?}");
+    #[cfg(debug_assertions)]
+    {
+        let end_time = Instant::now();
+        let duration = end_time - start_time;
+        println!("Parsed and optimized AST in {duration:?}");
+    }
 
     let mut state = vec![0_u8; args.memory_size.unwrap_or(DEFAULT_MEMORY_SIZE)];
     let mut pointer = 0_isize;
 
+    #[cfg(debug_assertions)]
+    let start_time = Instant::now();
     collected.execute(state.as_mut_slice(), &mut pointer);
-
-    // print_ast(deduplicate_channel.1, 0);
+    #[cfg(debug_assertions)]
+    {
+        let end_time = Instant::now();
+        let duration = end_time - start_time;
+        println!("Execution took {duration:?}");
+    }
 }
 
 #[allow(unused)]

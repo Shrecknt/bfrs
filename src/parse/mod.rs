@@ -1,6 +1,8 @@
+use crate::{ChunkedReceive, ChunkedReceiverWrapper};
 use std::{
+    collections::VecDeque,
     io::{Cursor, Read},
-    sync::mpsc::Sender,
+    sync::mpsc::{Receiver, Sender},
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -15,9 +17,22 @@ pub enum Token {
     RightBracket,
 }
 
+impl<T> ChunkedReceive<T> for ChunkedReceiverWrapper<Receiver<VecDeque<T>>, T> {
+    fn next(&mut self) -> Option<T> {
+        if !self.chunk.is_empty() {
+            return self.chunk.pop_front();
+        }
+        if let Ok(chunk) = self.receiver.recv() {
+            self.chunk = chunk;
+            return self.next();
+        }
+        None
+    }
+}
+
 impl Token {
-    pub fn parse(cursor: &mut Cursor<&[u8]>, sender: Sender<Vec<Token>>, chunk_size: usize) {
-        let mut chunks = Vec::with_capacity(chunk_size);
+    pub fn parse(cursor: &mut Cursor<&[u8]>, sender: Sender<VecDeque<Token>>, chunk_size: usize) {
+        let mut chunks = VecDeque::with_capacity(chunk_size);
         let mut buf = [0u8; 1];
         while let Ok(_) = cursor.read_exact(&mut buf) {
             let token = match buf[0] {
@@ -31,10 +46,10 @@ impl Token {
                 b']' => Token::RightBracket,
                 _ => continue,
             };
-            chunks.push_within_capacity(token).unwrap();
+            chunks.push_back(token);
             if chunks.capacity() == chunks.len() {
                 sender.send(chunks).unwrap();
-                chunks = Vec::with_capacity(8);
+                chunks = VecDeque::with_capacity(chunk_size);
             }
         }
         if !chunks.is_empty() {

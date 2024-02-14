@@ -20,14 +20,14 @@ impl DeduplicatedAstNode {
                     AstNode::Group(receiver) => {
                         if let Some(current_token_value) = current_token {
                             if current_token_value.is_nonzero() {
-                                chunks.push_within_capacity(current_token_value).unwrap();
+                                chunks.push(current_token_value);
                                 current_token = None;
                             } else {
                                 current_token = None;
                             }
                         }
                         let (s, r) = channel();
-                        chunks.push_within_capacity(Self::Group(r)).unwrap();
+                        chunks.push(Self::Group(r));
                         Self::parse(receiver, s);
                     }
                     AstNode::IncrementPointer | AstNode::DecrementPointer => {
@@ -41,7 +41,7 @@ impl DeduplicatedAstNode {
                                 *pointer_value += modifier;
                             } else {
                                 if current_token_value.is_nonzero() {
-                                    chunks.push_within_capacity(current_token.unwrap()).unwrap();
+                                    chunks.push(current_token.unwrap());
                                 }
                                 current_token = Some(Self::ModifyPointer(modifier));
                             }
@@ -60,7 +60,7 @@ impl DeduplicatedAstNode {
                                 *data_value += modifier;
                             } else {
                                 if current_token_value.is_nonzero() {
-                                    chunks.push_within_capacity(current_token.unwrap()).unwrap();
+                                    chunks.push(current_token.unwrap());
                                 }
                                 current_token = Some(Self::ModifyData(modifier));
                             }
@@ -71,20 +71,20 @@ impl DeduplicatedAstNode {
                     AstNode::Output => {
                         if let Some(current_token_value) = current_token {
                             if current_token_value.is_nonzero() {
-                                chunks.push_within_capacity(current_token_value).unwrap();
+                                chunks.push(current_token_value);
                             }
                             current_token = None;
                         }
-                        chunks.push_within_capacity(Self::Output).unwrap();
+                        chunks.push(Self::Output);
                     }
                     AstNode::Input => {
                         if let Some(current_token_value) = current_token {
                             if current_token_value.is_nonzero() {
-                                chunks.push_within_capacity(current_token_value).unwrap();
+                                chunks.push(current_token_value);
                             }
                             current_token = None;
                         }
-                        chunks.push_within_capacity(Self::Input).unwrap();
+                        chunks.push(Self::Input);
                     }
                 }
             }
