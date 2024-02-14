@@ -21,7 +21,7 @@ impl AstNode {
                     Token::LeftBracket => {
                         let (s, r) = channel();
                         chunks.push_within_capacity(Self::Group(r)).unwrap();
-                        let remaining_chunk = Self::parse(receiver, s);
+                        let _remaining_chunk = Self::parse(receiver, s);
                         todo!();
                     }
                     Token::RightBracket => {
