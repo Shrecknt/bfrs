@@ -20,7 +20,7 @@ struct Args {
     pub target: std::path::PathBuf,
 
     /// Optimization level from 0 to 1
-    /// where 0 is not optimized at all
+    /// where 0 is barely any optimizations
     /// and 1 is highly optimized
     /// `default = 0`
     #[arg(short = 'O')]
@@ -35,8 +35,14 @@ struct Args {
     /// Size of chunks to be used in
     /// the parsing pipeline
     /// `default = 64`
-    #[arg(short = 'c', long = "chunk-size")]
+    #[arg(short = 'C', long = "chunk-size")]
     pub chunk_size: Option<usize>,
+
+    /// Whether the program should be
+    /// compiled instead of interpreted
+    /// `default = false`
+    #[arg(short = 'c')]
+    pub compile: bool,
 }
 
 fn main() {
@@ -98,16 +104,21 @@ fn main() {
         println!("Parsed and optimized AST in {duration:?}");
     }
 
-    let mut state = vec![0_u8; args.memory_size.unwrap_or(DEFAULT_MEMORY_SIZE)];
-    let mut pointer = 0_isize;
+    if !args.compile {
+        let mut state = vec![0_u8; args.memory_size.unwrap_or(DEFAULT_MEMORY_SIZE)];
+        let mut pointer = 0_isize;
 
-    let start_time = Instant::now();
-    collected.execute(state.as_mut_slice(), &mut pointer);
-    if display_times {
-        let end_time = Instant::now();
-        let duration = end_time - start_time;
-        println!("Execution took {duration:?}");
+        let start_time = Instant::now();
+        collected.execute(state.as_mut_slice(), &mut pointer);
+        if display_times {
+            let end_time = Instant::now();
+            let duration = end_time - start_time;
+            println!("Execution took {duration:?}");
+        }
+        return;
     }
+
+    todo!()
 }
 
 #[allow(unused)]
