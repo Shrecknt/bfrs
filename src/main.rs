@@ -43,6 +43,14 @@ struct Args {
     /// `default = false`
     #[arg(short = 'c')]
     pub compile: bool,
+
+    /// Whether the parser should be run
+    /// synchronously instead of threaded
+    /// (intended for debugging)
+    /// causes occasional deadlocks atm
+    /// `default = false`
+    #[arg(long = "sync")]
+    pub synchronous: bool,
 }
 
 fn main() {
@@ -62,22 +70,44 @@ fn main() {
 
     let start_time = Instant::now();
 
+    let sync_mutex = if args.synchronous {
+        Some(std::sync::Arc::new(parking_lot::FairMutex::new(())))
+    } else {
+        None
+    };
+
     let mut collected = VecDeque::new();
     thread::scope(|s| {
         s.spawn(|| {
+            let sync_mutex = sync_mutex.clone();
+            let lock = match &sync_mutex {
+                Some(sync_mutex) => Some(std::rc::Rc::new(sync_mutex.lock())),
+                None => None,
+            };
+
             bfrs::parse::Token::parse(
                 &mut program,
                 token_channel.0,
                 args.chunk_size.unwrap_or(DEFAULT_CHUNK_SIZE),
             );
+
+            drop(lock);
         });
         s.spawn(|| {
+            let sync_mutex = sync_mutex.clone();
+            let lock = match &sync_mutex {
+                Some(sync_mutex) => Some(std::rc::Rc::new(sync_mutex.lock())),
+                None => None,
+            };
+
             let mut receiver = ChunkedReceiverWrapper::new(token_channel.1);
             bfrs::ast::AstNode::parse(
                 &mut receiver,
                 ast_channel.0,
                 args.chunk_size.unwrap_or(DEFAULT_CHUNK_SIZE),
             );
+
+            drop(lock);
 
             if display_times {
                 let end_time = Instant::now();
@@ -86,12 +116,28 @@ fn main() {
             }
         });
         s.spawn(|| {
+            let sync_mutex = sync_mutex.clone();
+            let lock = match &sync_mutex {
+                Some(sync_mutex) => Some(std::rc::Rc::new(sync_mutex.lock())),
+                None => None,
+            };
+
             let receiver = ChunkedReceiverWrapper::new(ast_channel.1);
             bfrs::deduplicate::DeduplicatedAstNode::parse(receiver, deduplicate_channel.0);
+
+            drop(lock);
         });
         s.spawn(|| {
+            let sync_mutex = sync_mutex.clone();
+            let lock = match &sync_mutex {
+                Some(sync_mutex) => Some(std::rc::Rc::new(sync_mutex.lock())),
+                None => None,
+            };
+
             let mut receiver = ChunkedReceiverWrapper::new(deduplicate_channel.1);
             collected = bfrs::collect::CollectedAstNode::parse(&mut receiver);
+
+            drop(lock);
         });
     });
     if args.optimization.unwrap_or(DEFAULT_OPTIMIZATION) >= 1 {
